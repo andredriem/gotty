@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
+	"net"
 	"net/http"
 	"net/url"
 	"sync/atomic"
@@ -59,6 +61,12 @@ func (server *Server) generateHandleWS(ctx context.Context, cancel context.Cance
 		}
 
 		log.Printf("New client connected: %s, connections: %d/%d", r.RemoteAddr, num, server.options.MaxConnection)
+		if len(server.options.ClientIp) > 0 {
+			if getRealAddr(r) != server.options.ClientIp {
+				http.Error(w, "Forbidden", 403)
+				return
+			}
+		}
 
 		if r.Method != "GET" {
 			http.Error(w, "Method not allowed", 405)
@@ -232,4 +240,31 @@ func (server *Server) titleVariables(order []string, varUnits map[string]map[str
 	}
 
 	return titleVars
+}
+
+
+func getRealAddr(r *http.Request)  string {
+
+    remoteIP := ""
+    // the default is the originating ip. but we try to find better options because this is almost
+    // never the right IP
+    if parts := strings.Split(r.RemoteAddr, ":"); len(parts) == 2 {
+        remoteIP = parts[0]
+    }
+    // If we have a forwarded-for header, take the address from there
+    if xff := strings.Trim(r.Header.Get("X-Forwarded-For"), ","); len(xff) > 0 {
+        addrs := strings.Split(xff, ",")
+        lastFwd := addrs[len(addrs)-1]
+        if ip := net.ParseIP(lastFwd); ip != nil {
+            remoteIP = ip.String()
+        }
+    // parse X-Real-Ip header
+    } else if xri := r.Header.Get("X-Real-Ip"); len(xri) > 0 {
+        if ip := net.ParseIP(xri); ip != nil {
+            remoteIP = ip.String()
+        }
+    }
+
+    return remoteIP
+
 }
